@@ -1,0 +1,45 @@
+name: Publish Docker Hub image
+
+on:
+  push:
+    branches: ['main']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and load container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: dirkvdb/chromecast2mqtt:latest
+          cache-from: type=gha,scope=dockerhub
+          cache-to: type=gha,mode=max,scope=dockerhub
+
+      - name: Smoke-test container image
+        run: docker run --rm --network none dirkvdb/chromecast2mqtt:latest --help
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push container image
+        run: docker push dirkvdb/chromecast2mqtt:latest
