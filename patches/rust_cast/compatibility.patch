@@ -1,0 +1,436 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -72,6 +72,9 @@
+ [dependencies.serde_json]
+ version = "1"
+ 
++[dependencies.serde_path_to_error]
++version = "0.1"
++
+ [dependencies.thiserror]
+ version = "2"
+ 
+--- a/Cargo.toml.orig
++++ b/Cargo.toml.orig
+@@ -25,6 +25,7 @@
+ rustls-native-certs = "0.8"
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
++serde_path_to_error = "0.1"
+ thiserror = "2"
+ 
+ [dev-dependencies]
+--- a/src/cast/proxies.rs
++++ b/src/cast/proxies.rs
+@@ -341,7 +341,7 @@
+     #[allow(dead_code)]
+     pub struct StatusReply {
+         #[serde(rename = "requestId", default)]
+-        pub request_id: u32,
++        pub request_id: u64,
+ 
+         #[serde(rename = "type")]
+         pub typ: String,
+@@ -352,26 +352,26 @@
+     #[derive(Deserialize, Debug)]
+     pub struct LoadCancelledReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+     }
+ 
+     #[derive(Deserialize, Debug)]
+     pub struct LoadFailedReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+     }
+ 
+     #[derive(Deserialize, Debug)]
+     pub struct InvalidPlayerStateReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+     }
+ 
+     #[derive(Deserialize, Debug)]
+     #[allow(dead_code)]
+     pub struct InvalidRequestReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+ 
+         #[serde(rename = "type")]
+         pub typ: String,
+@@ -445,7 +445,7 @@
+     #[allow(dead_code)]
+     pub struct StatusReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+ 
+         #[serde(rename = "type")]
+         pub typ: String,
+@@ -507,7 +507,7 @@
+     #[allow(dead_code)]
+     pub struct LaunchErrorReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+ 
+         #[serde(rename = "type")]
+         pub typ: String,
+@@ -519,7 +519,7 @@
+     #[allow(dead_code)]
+     pub struct InvalidRequestReply {
+         #[serde(rename = "requestId")]
+-        pub request_id: u32,
++        pub request_id: u64,
+ 
+         #[serde(rename = "type")]
+         pub typ: String,
+--- a/src/channels/receiver.rs
++++ b/src/channels/receiver.rs
+@@ -92,7 +92,7 @@
+ #[derive(Clone, Debug)]
+ pub struct Status {
+     /// Unique id of the request that requested the status.
+-    pub request_id: u32,
++    pub request_id: u64,
+     /// Contains the list of applications that are currently run.
+     pub applications: Vec<Application>,
+     /// Determines whether the Cast device is the active input or not.
+@@ -107,7 +107,7 @@
+ #[derive(Clone, Debug)]
+ pub struct LaunchError {
+     /// Unique id of the request that tried to launch application.
+-    pub request_id: u32,
++    pub request_id: u64,
+     /// Description of the launch error reason if available.
+     pub reason: Option<String>,
+ }
+@@ -116,7 +116,7 @@
+ #[derive(Clone, Debug)]
+ pub struct InvalidRequest {
+     /// Unique id of the invalid request.
+-    pub request_id: u32,
++    pub request_id: u64,
+     /// Description of the invalid request reason if available.
+     pub reason: Option<String>,
+ }
+@@ -238,12 +238,12 @@
+ 
+             match self.parse(message)? {
+                 ReceiverResponse::Status(mut status) => {
+-                    if status.request_id == request_id {
++                    if status.request_id == u64::from(request_id) {
+                         return Ok(Some(status.applications.remove(0)));
+                     }
+                 }
+                 ReceiverResponse::LaunchError(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(format!(
+                             "Could not run application ({}).",
+                             error.reason.unwrap_or_else(|| "Unknown".to_string())
+@@ -327,12 +327,12 @@
+ 
+             match self.parse(message)? {
+                 ReceiverResponse::Status(status) => {
+-                    if status.request_id == request_id {
++                    if status.request_id == u64::from(request_id) {
+                         return Ok(Some(()));
+                     }
+                 }
+                 ReceiverResponse::InvalidRequest(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(format!(
+                             "Invalid request ({}).",
+                             error.reason.unwrap_or_else(|| "Unknown".to_string())
+@@ -373,7 +373,7 @@
+ 
+             let message = self.parse(message)?;
+             if let ReceiverResponse::Status(status) = message
+-                && status.request_id == request_id
++                && status.request_id == u64::from(request_id)
+             {
+                 return Ok(Some(status));
+             }
+@@ -426,7 +426,7 @@
+ 
+             let message = self.parse(message)?;
+             if let ReceiverResponse::Status(status) = message
+-                && status.request_id == request_id
++                && status.request_id == u64::from(request_id)
+             {
+                 return Ok(Some(status.volume));
+             }
+@@ -461,7 +461,7 @@
+         let response = match message_type.as_ref() {
+             MESSAGE_TYPE_RECEIVER_STATUS => {
+                 let status_reply: proxies::receiver::StatusReply =
+-                    serde_json::value::from_value(reply)?;
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 let status = Status {
+                     request_id: status_reply.request_id,
+@@ -494,7 +494,7 @@
+             }
+             MESSAGE_TYPE_LAUNCH_ERROR => {
+                 let reply: proxies::receiver::LaunchErrorReply =
+-                    serde_json::value::from_value(reply)?;
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 ReceiverResponse::LaunchError(LaunchError {
+                     request_id: reply.request_id,
+@@ -503,7 +503,7 @@
+             }
+             MESSAGE_TYPE_INVALID_REQUEST => {
+                 let reply: proxies::receiver::InvalidRequestReply =
+-                    serde_json::value::from_value(reply)?;
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 ReceiverResponse::InvalidRequest(InvalidRequest {
+                     request_id: reply.request_id,
+@@ -516,3 +516,4 @@
+         Ok(response)
+     }
+ }
++
+--- a/src/channels/media.rs
++++ b/src/channels/media.rs
+@@ -618,7 +618,7 @@
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct Status {
+     /// Unique id of the request that requested the status.
+-    pub request_id: u32,
++    pub request_id: u64,
+     /// Detailed status of every media status entry.
+     pub entries: Vec<StatusEntry>,
+ }
+@@ -729,14 +729,14 @@
+ #[derive(Copy, Clone, Debug, PartialEq)]
+ pub struct LoadCancelled {
+     /// Unique id of the request that caused this error.
+-    pub request_id: u32,
++    pub request_id: u64,
+ }
+ 
+ /// Describes the load failed error.
+ #[derive(Copy, Clone, Debug, PartialEq)]
+ pub struct LoadFailed {
+     /// Unique id of the request that caused this error.
+-    pub request_id: u32,
++    pub request_id: u64,
+ }
+ 
+ /// The additional options for a load command request.
+@@ -761,14 +761,14 @@
+ #[derive(Copy, Clone, Debug, PartialEq)]
+ pub struct InvalidPlayerState {
+     /// Unique id of the request that caused this error.
+-    pub request_id: u32,
++    pub request_id: u64,
+ }
+ 
+ /// Describes the invalid request error.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct InvalidRequest {
+     /// Unique id of the invalid request.
+-    pub request_id: u32,
++    pub request_id: u64,
+     /// Description of the invalid request reason if available.
+     pub reason: Option<String>,
+ }
+@@ -1005,12 +1005,12 @@
+ 
+             match self.parse(message)? {
+                 MediaResponse::Status(status) => {
+-                    if status.request_id == request_id {
++                    if status.request_id == u64::from(request_id) {
+                         return Ok(Some(status));
+                     }
+                 }
+                 MediaResponse::InvalidRequest(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(format!(
+                             "Invalid request ({}).",
+                             error.reason.unwrap_or_else(|| "Unknown".to_string())
+@@ -1117,7 +1117,7 @@
+ 
+             match self.parse(message)? {
+                 MediaResponse::Status(status) => {
+-                    if status.request_id == request_id {
++                    if status.request_id == u64::from(request_id) {
+                         return Ok(Some(status));
+                     }
+ 
+@@ -1139,26 +1139,26 @@
+                     }
+                 }
+                 MediaResponse::LoadFailed(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal("Failed to load media.".to_string()));
+                     }
+                 }
+                 MediaResponse::LoadCancelled(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(
+                             "Load cancelled by another request.".to_string(),
+                         ));
+                     }
+                 }
+                 MediaResponse::InvalidPlayerState(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(
+                             "Load failed because of invalid player state.".to_string(),
+                         ));
+                     }
+                 }
+                 MediaResponse::InvalidRequest(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(format!(
+                             "Load failed because of invalid media request (reason: {}).",
+                             error.reason.unwrap_or_else(|| "UNKNOWN".to_string())
+@@ -1209,31 +1209,31 @@
+ 
+             match self.parse(message)? {
+                 MediaResponse::Status(status) => {
+-                    if status.request_id == request_id {
++                    if status.request_id == u64::from(request_id) {
+                         return Ok(Some(status));
+                     }
+                 }
+                 MediaResponse::LoadFailed(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal("Failed to load media.".to_string()));
+                     }
+                 }
+                 MediaResponse::LoadCancelled(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(
+                             "Load cancelled by another request.".to_string(),
+                         ));
+                     }
+                 }
+                 MediaResponse::InvalidPlayerState(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(
+                             "Load failed because of invalid player state.".to_string(),
+                         ));
+                     }
+                 }
+                 MediaResponse::InvalidRequest(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(format!(
+                             "Load failed because of invalid media request (reason: {}).",
+                             error.reason.unwrap_or_else(|| "UNKNOWN".to_string())
+@@ -1420,7 +1420,7 @@
+ 
+         let response = match message_type.as_ref() {
+             MESSAGE_TYPE_MEDIA_STATUS => {
+-                let reply: proxies::media::StatusReply = serde_json::value::from_value(reply)?;
++                let reply: proxies::media::StatusReply = crate::utils::deserialize_reply(reply)?;
+ 
+                 let entries = reply
+                     .status
+@@ -1435,14 +1435,15 @@
+             }
+             MESSAGE_TYPE_LOAD_CANCELLED => {
+                 let reply: proxies::media::LoadCancelledReply =
+-                    serde_json::value::from_value(reply)?;
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 MediaResponse::LoadCancelled(LoadCancelled {
+                     request_id: reply.request_id,
+                 })
+             }
+             MESSAGE_TYPE_LOAD_FAILED => {
+-                let reply: proxies::media::LoadFailedReply = serde_json::value::from_value(reply)?;
++                let reply: proxies::media::LoadFailedReply =
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 MediaResponse::LoadFailed(LoadFailed {
+                     request_id: reply.request_id,
+@@ -1450,7 +1451,7 @@
+             }
+             MESSAGE_TYPE_INVALID_PLAYER_STATE => {
+                 let reply: proxies::media::InvalidPlayerStateReply =
+-                    serde_json::value::from_value(reply)?;
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 MediaResponse::InvalidPlayerState(InvalidPlayerState {
+                     request_id: reply.request_id,
+@@ -1458,7 +1459,7 @@
+             }
+             MESSAGE_TYPE_INVALID_REQUEST => {
+                 let reply: proxies::media::InvalidRequestReply =
+-                    serde_json::value::from_value(reply)?;
++                    crate::utils::deserialize_reply(reply)?;
+ 
+                 MediaResponse::InvalidRequest(InvalidRequest {
+                     request_id: reply.request_id,
+@@ -1466,7 +1467,8 @@
+                 })
+             }
+             MESSAGE_TYPE_ERROR => {
+-                let reply: proxies::media::MediaErrorReply = serde_json::value::from_value(reply)?;
++                let reply: proxies::media::MediaErrorReply =
++                    crate::utils::deserialize_reply(reply)?;
+                 let detailed_error_code =
+                     MediaDetailedErrorCode::try_from(reply.detailed_error_code)?;
+ 
+@@ -1504,7 +1506,7 @@
+ 
+             match self.parse(message)? {
+                 MediaResponse::Status(mut status) => {
+-                    if status.request_id == request_id {
++                    if status.request_id == u64::from(request_id) {
+                         let position = status
+                             .entries
+                             .iter()
+@@ -1514,14 +1516,14 @@
+                     }
+                 }
+                 MediaResponse::InvalidPlayerState(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(
+                             "Request failed because of invalid player state.".to_string(),
+                         ));
+                     }
+                 }
+                 MediaResponse::InvalidRequest(error) => {
+-                    if error.request_id == request_id {
++                    if error.request_id == u64::from(request_id) {
+                         return Err(Error::Internal(format!(
+                             "Invalid request ({}).",
+                             error.reason.unwrap_or_else(|| "Unknown".to_string())
+--- a/src/utils.rs
++++ b/src/utils.rs
+@@ -2,6 +2,15 @@
+ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+ use std::io::Cursor;
+ 
++/// Adds the JSON field path while retaining the existing serialization error variant.
++pub(crate) fn deserialize_reply<T: serde::de::DeserializeOwned>(
++    reply: serde_json::Value,
++) -> Result<T, Error> {
++    serde_path_to_error::deserialize(reply).map_err(|error| {
++        Error::Serialization(<serde_json::Error as serde::de::Error>::custom(error))
++    })
++}
++
+ pub fn read_u32_from_buffer(buffer: &[u8]) -> Result<u32, Error> {
+     Ok(Cursor::new(buffer).read_u32::<BigEndian>()?)
+ }

@@ -1,0 +1,15 @@
+# Prompt for missing credentials on interactive shell activation and store them
+# in the desktop keyring. The Rust SDK reads them directly when the bridge starts.
+secretspec:
+  enable: true
+  provider: keyring
+  profile: development
+
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  rust-overlay:
+    url: github:oxalica/rust-overlay
+    inputs:
+      nixpkgs:
+        follows: nixpkgs

@@ -1,0 +1,45 @@
+[package]
+name = "chromecast2mqtt"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Chromecast MQTT bridge compatible with chromecast-mqtt-connector"
+license = "MIT"
+default-run = "chromecast2mqtt"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive", "env"] }
+clap-verbosity-flag = "3.0"
+env_logger = "0.11"
+log = "0.4"
+mdns-sd = "0.21"
+mime_guess = "2.0"
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
+rust_cast = "0.21"
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2.2"
+secretspec = { version = "0.21.1", default-features = false, features = ["keyring"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.53", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+
+# Native API compatibility fixes pending an upstream rust_cast release.
+[patch.crates-io]
+rust_cast = { path = ".build/rust_cast" }
+
+[dev-dependencies]
+rcgen = "0.14"
+tempfile = "3"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
